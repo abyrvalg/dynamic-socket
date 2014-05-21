@@ -21,7 +21,6 @@ module.exports = function(io, dbConfig) {
 			var _self = this;
 			socket.on("disconnect", function(){
 				getCollection(function(collection){
-					console.log("dissconetct")
 					collection.remove({socketID : _self.socketID}, function(err){
 						!err && (delete _self);
 					});					
@@ -33,7 +32,8 @@ module.exports = function(io, dbConfig) {
 		set : function(data, callback){
 			var _self = this;
 			getCollection(function(collection){
-				data.socketID = this.socketID;
+				data["$set"] = data["$set"] || {}
+				data["$set"].socketID = _self.socketID;
 				collection.update({_id : _self._id}, data, {upsert : true}, callback || (function(err, result){
 					console.log(arguments)
 				}))
@@ -48,11 +48,12 @@ module.exports = function(io, dbConfig) {
 					var currentSocketData = currentSocketData || {},
 						query  = JSON.parse(eventRules.replace(/\"?__(me|param)\.(\w+)\"?/g, function(str, source, prop){
 							var sourceObj = source == "me" ? currentSocketData : params;
+							console.log(sourceObj);
 							if(sourceObj[prop]) {
 								return sourceObj[prop];
 							}
 							else {
-								throw new Error(str + "is not found");
+								throw new Error(str + " is not found");
 							}
 						}).replace(/\"?__(\w+)\((.+?)\)\"?/g, function(str, getter, args){
 							if(typeof getters[getter] == "function") {
@@ -63,7 +64,6 @@ module.exports = function(io, dbConfig) {
 							}							
 						}));					
 					query.socketID = {$ne : _self.socketID};
-						console.log(query);
 					collection.find(query, function(err, result){						
 						result.each(function(err, record){		
 							record && io.sockets.socket(record.socketID).emit(event, data);
@@ -80,7 +80,7 @@ module.exports = function(io, dbConfig) {
 			}
 		},
 		getInstane : function(socket, _id){
-			return new dsInstance(socket);
+			return new dsInstance(socket, _id);
 		},
 		setupGetter : function(name, getter) {
 			getters[name] = getter;
