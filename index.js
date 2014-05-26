@@ -17,11 +17,15 @@ module.exports = function(io, dbConfig) {
 			connect.then(function(collection) {
 				_self.collection = collection;
 				_self.itemCreatePromise = q.denodeify(_self.collection.update).call(_self.collection, {_id : _self._id}, {$set : {socketID : _self.socketID}}, {upsert : true});
-			})
+			});			
 			socket.on("disconnect", function(){
-				//getCollection(function(collection){
-					delete _self;			
-				//});
+				_self.itemCreatePromise.then(function(){
+					_self.collection.update({_id : _self.id}, {$unset : {socketID : 1}}, function(err){
+						if(!err) {
+							delete _self;
+						}
+					})
+				})			
 			});
 		};
 		
@@ -32,32 +36,22 @@ module.exports = function(io, dbConfig) {
 				_self.collection.update({_id : _self._id}, data, callback);
 			});
 		},
+		get : function(data, callback) {
+			var _self = this;
+			this.itemCreatePromise.then(function(){
+				_self.collection.findOne({_id: _self._id}, data, callback);
+			})
+		},
 		send : function(event, params, data, callback) {
 			var eventRules = rules[event] || {},
 				_self = this;
 			this.itemCreatePromise.then(function(err, res){
-				_self.collection.findOne({_id : _self._id}, function(err, currentSocketData){
-					console.log("------------------------------");
-					console.log(currentSocketData);
+				_self.collection.findOne({_id : _self._id}, function(err, sender){
 					var currentSocketData = currentSocketData || {};
-					var query  = JSON.parse(eventRules.replace(/\"?__(me|param)\.(\w+)\"?/g, function(str, source, prop){
-							var sourceObj = source == "me" ? currentSocketData : params;
-							if(sourceObj[prop]) {
-								return JSON.stringify(sourceObj[prop]);
-							}
-							else {
-								throw new Error(str + " is not found");
-							}
-						}).replace(/\"?__(\w+)\((.+?)\)\"?/g, function(str, getter, args){
-							if(typeof getters[getter] == "function") {
-								return JSON.stringify(getters[getter].apply(getters, (args && args.split(","))));
-							} else {
-								throw new Error(getter+" getter is not function or not defined");
-							}							
-						}));					
+					var query  = typeof eventRules == "function" ? eventRules(sender, params) : eventRules;
 					query.socketID = {$ne : _self.socketID};
 					_self.collection.find(query, function(err, result){						
-						result.each(function(err, record){		
+						result.each(function(err, record){
 							record && io.sockets.socket(record.socketID).emit(event, data);
 						})
 					});
@@ -68,15 +62,11 @@ module.exports = function(io, dbConfig) {
 	return {
 		setupRules : function(dataRules){
 			for(key in dataRules) {
-				rules[key] = JSON.stringify(dataRules[key]);
+				rules[key] = dataRules[key];
 			}
 		},
 		getInstance : function(socket, _id){
 			return new dsInstance(socket, _id);
-		},
-		setupGetter : function(name, getter) {
-			getters[name] = getter;
-			return this;
 		}
 	}
 }
